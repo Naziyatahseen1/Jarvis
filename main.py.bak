@@ -1,0 +1,924 @@
+import os
+import sys
+import argparse
+import threading
+import time
+import webbrowser
+import urllib.parse
+
+import pyautogui
+import pygetwindow as gw
+
+from dotenv import load_dotenv
+
+from core.voice import speak, listen
+from core.registry import SkillRegistry
+from core.engine import JarvisEngine
+from core.context_manager import global_context
+from gui.app import run_gui as run_gui_app
+
+
+# ============================================================
+# LOAD ENVIRONMENT
+# ============================================================
+
+load_dotenv()
+
+if not os.environ.get("GROQ_API_KEY"):
+    print("Error: GROQ_API_KEY not found.")
+    sys.exit(1)
+
+
+# ============================================================
+# FIND AND FOCUS BROWSER / YOUTUBE
+# ============================================================
+
+def focus_browser_window():
+
+    browser_window = None
+
+    try:
+
+        # First try to find YouTube
+        for window in gw.getAllWindows():
+
+            title = (
+                window.title or ""
+            ).lower()
+
+            if "youtube" in title:
+
+                browser_window = window
+                break
+
+        # If YouTube was not found, find any browser
+        if browser_window is None:
+
+            for window in gw.getAllWindows():
+
+                title = (
+                    window.title or ""
+                ).lower()
+
+                if (
+                    "chrome" in title
+                    or "edge" in title
+                    or "firefox" in title
+                    or "brave" in title
+                ):
+
+                    browser_window = window
+                    break
+
+    except Exception as e:
+
+        print(
+            f"[JARVIS Gesture] "
+            f"Window search error: {e}"
+        )
+
+        return False
+
+    if browser_window is None:
+
+        print(
+            "[JARVIS Gesture] "
+            "YouTube/browser window not found."
+        )
+
+        return False
+
+    try:
+
+        if browser_window.isMinimized:
+
+            browser_window.restore()
+
+        browser_window.activate()
+
+        time.sleep(0.3)
+
+        return True
+
+    except Exception as e:
+
+        print(
+            "[JARVIS Gesture] "
+            f"Could not focus browser: {e}"
+        )
+
+        return False
+
+
+# ============================================================
+# GESTURE -> YOUTUBE CONTROL
+# ============================================================
+
+def handle_gesture_event(event):
+
+    gesture = event.gesture
+
+    print(
+        f"[JARVIS Gesture] Received: {gesture}"
+    )
+
+    # --------------------------------------------------------
+    # INDEX FINGER
+    # --------------------------------------------------------
+    # Cursor movement is already handled directly inside
+    # gesture_controller.py.
+    #
+    # Therefore we do nothing here.
+    # --------------------------------------------------------
+
+    if gesture == "index_point":
+
+        return
+
+    # --------------------------------------------------------
+    # PLAY / PAUSE
+    # --------------------------------------------------------
+
+    if gesture in [
+        "fist",
+        "open_palm"
+    ]:
+
+        if not focus_browser_window():
+
+            return
+
+        print(
+            "[JARVIS Gesture] "
+            "Sending YouTube PLAY/PAUSE"
+        )
+
+        pyautogui.press("k")
+
+        return
+
+    # --------------------------------------------------------
+    # VOLUME UP
+    # --------------------------------------------------------
+
+    if gesture == "thumbs_up":
+
+        if not focus_browser_window():
+
+            return
+
+        print(
+            "[JARVIS Gesture] "
+            "Sending YouTube VOLUME UP"
+        )
+
+        pyautogui.press("up")
+
+        return
+
+    # --------------------------------------------------------
+    # VOLUME DOWN
+    # --------------------------------------------------------
+
+    if gesture == "thumbs_down":
+
+        if not focus_browser_window():
+
+            return
+
+        print(
+            "[JARVIS Gesture] "
+            "Sending YouTube VOLUME DOWN"
+        )
+
+        pyautogui.press("down")
+
+        return
+
+    # --------------------------------------------------------
+    # SWIPE RIGHT -> FORWARD
+    # --------------------------------------------------------
+
+    if gesture == "swipe_right":
+
+        if not focus_browser_window():
+
+            return
+
+        print(
+            "[JARVIS Gesture] "
+            "Sending YouTube FORWARD"
+        )
+
+        pyautogui.press("right")
+
+        return
+
+    # --------------------------------------------------------
+    # SWIPE LEFT -> BACKWARD
+    # --------------------------------------------------------
+
+    if gesture == "swipe_left":
+
+        if not focus_browser_window():
+
+            return
+
+        print(
+            "[JARVIS Gesture] "
+            "Sending YouTube BACKWARD"
+        )
+
+        pyautogui.press("left")
+
+        return
+
+
+# ============================================================
+# YOUTUBE DIRECT COMMAND HANDLER
+# ============================================================
+
+def handle_youtube_command(query):
+
+    query = query.lower().strip()
+
+    # --------------------------------------------------------
+    # OPEN YOUTUBE
+    # --------------------------------------------------------
+
+    if query in [
+        "open youtube",
+        "launch youtube",
+        "start youtube",
+        "youtube",
+        "open you tube",
+        "launch you tube"
+    ]:
+
+        webbrowser.open(
+            "https://www.youtube.com"
+        )
+
+        global_context.set(
+            app_type="browser",
+            app_name="youtube"
+        )
+
+        speak(
+            "YouTube has been opened."
+        )
+
+        return True
+
+    # --------------------------------------------------------
+    # PLAY / SEARCH YOUTUBE
+    # --------------------------------------------------------
+
+    play_prefixes = [
+        "play ",
+        "search youtube for ",
+        "search youtube ",
+        "find youtube ",
+        "find on youtube ",
+        "youtube search "
+    ]
+
+    search_text = None
+
+    for prefix in play_prefixes:
+
+        if query.startswith(prefix):
+
+            search_text = (
+                query[len(prefix):].strip()
+            )
+
+            break
+
+    if not search_text:
+
+        return False
+
+    # --------------------------------------------------------
+    # CLEAN SEARCH TEXT
+    # --------------------------------------------------------
+
+    remove_words = [
+        " on youtube",
+        " in youtube",
+        " on youtube videos",
+        " youtube videos"
+    ]
+
+    for word in remove_words:
+
+        if search_text.endswith(word):
+
+            search_text = (
+                search_text[:-len(word)].strip()
+            )
+
+    # --------------------------------------------------------
+    # MUSIC COMMANDS
+    # --------------------------------------------------------
+
+    if search_text in [
+        "songs",
+        "song",
+        "music",
+        "some songs",
+        "some music"
+    ]:
+
+        search_text = "popular songs"
+
+    if not search_text:
+
+        return False
+
+    # --------------------------------------------------------
+    # CREATE YOUTUBE SEARCH URL
+    # --------------------------------------------------------
+
+    encoded_query = urllib.parse.quote_plus(
+        search_text
+    )
+
+    youtube_url = (
+        "https://www.youtube.com/results?search_query="
+        + encoded_query
+    )
+
+    print(
+        f"JARVIS: Searching YouTube for "
+        f"{search_text}"
+    )
+
+    speak(
+        f"Searching YouTube for {search_text}."
+    )
+
+    # --------------------------------------------------------
+    # OPEN SEARCH
+    # --------------------------------------------------------
+
+    webbrowser.open(
+        youtube_url
+    )
+
+    global_context.set(
+        app_type="browser",
+        app_name="youtube"
+    )
+
+    # --------------------------------------------------------
+    # TRY TO PLAY FIRST VIDEO
+    # --------------------------------------------------------
+
+    time.sleep(4)
+
+    try:
+
+        # Focus browser
+        focus_browser_window()
+
+        time.sleep(0.5)
+
+        # Focus address bar
+        pyautogui.hotkey(
+            "ctrl",
+            "l"
+        )
+
+        pyautogui.press(
+            "enter"
+        )
+
+        time.sleep(3)
+
+        # Try to reach first result
+        pyautogui.press(
+            "tab",
+            presses=6,
+            interval=0.3
+        )
+
+        pyautogui.press(
+            "enter"
+        )
+
+        time.sleep(3)
+
+        speak(
+            f"Playing the first YouTube "
+            f"result for {search_text}."
+        )
+
+    except Exception as e:
+
+        print(
+            f"YouTube playback automation error: {e}"
+        )
+
+        speak(
+            "I opened the YouTube search results, "
+            "but I could not automatically play "
+            "the video."
+        )
+
+    return True
+
+
+# ============================================================
+# WAIT FOR WAKE WORD
+# ============================================================
+
+def wait_for_wake_word():
+
+    wake_words = [
+        "jarvis",
+        "hey jarvis",
+        "hello jarvis",
+        "okay jarvis",
+        "ok jarvis",
+        "jarvis ji",
+        "jarvis j"
+    ]
+
+    while True:
+
+        print(
+            "Waiting for wake word: Jarvis..."
+        )
+
+        query = listen()
+
+        if query == "none":
+
+            continue
+
+        query = query.lower().strip()
+
+        print(
+            f"Wake-word listener heard: {query}"
+        )
+
+        # ----------------------------------------------------
+        # CHECK WAKE WORD
+        # ----------------------------------------------------
+
+        for wake_word in wake_words:
+
+            if wake_word in query:
+
+                print(
+                    "Wake word detected!"
+                )
+
+                return True
+
+        # ----------------------------------------------------
+        # RECOGNITION VARIATIONS
+        # ----------------------------------------------------
+
+        jarvis_variations = [
+            "jarvis",
+            "jarvis.",
+            "jarvis!",
+            "jarvis?",
+            "jarvis please",
+            "hey jarvis"
+        ]
+
+        words = query.split()
+
+        for word in words:
+
+            if word in jarvis_variations:
+
+                print(
+                    "Wake word detected!"
+                )
+
+                return True
+
+
+# ============================================================
+# MAIN JARVIS LOOP
+# ============================================================
+
+def jarvis_loop(
+    pause_event,
+    registry,
+    args
+):
+
+    jarvis = JarvisEngine(
+        registry
+    )
+
+    # --------------------------------------------------------
+    # STARTUP
+    # --------------------------------------------------------
+
+    if args.text:
+
+        print(
+            "JARVIS: Jarvis Online. "
+            "Waiting for wake word..."
+        )
+
+    else:
+
+        speak(
+            "Jarvis Online. Waiting for my name."
+        )
+
+    # ========================================================
+    # CONTINUOUS WAKE WORD LOOP
+    # ========================================================
+
+    while True:
+
+        # ----------------------------------------------------
+        # GUI PAUSED
+        # ----------------------------------------------------
+
+        if pause_event.is_set():
+
+            time.sleep(0.5)
+
+            continue
+
+        # ----------------------------------------------------
+        # TEXT MODE
+        # ----------------------------------------------------
+
+        if args.text:
+
+            try:
+
+                wake_query = input(
+                    "WAITING FOR JARVIS: "
+                ).strip().lower()
+
+            except EOFError:
+
+                break
+
+            if "jarvis" not in wake_query:
+
+                print(
+                    "Wake word not detected."
+                )
+
+                continue
+
+        # ----------------------------------------------------
+        # VOICE MODE
+        # ----------------------------------------------------
+
+        else:
+
+            if not wait_for_wake_word():
+
+                continue
+
+        # ----------------------------------------------------
+        # WAKE WORD DETECTED
+        # ----------------------------------------------------
+
+        if pause_event.is_set():
+
+            continue
+
+        print(
+            "JARVIS: Wake word detected."
+        )
+
+        speak(
+            "Yes, how can I help?"
+        )
+
+        # ----------------------------------------------------
+        # LISTEN FOR COMMAND
+        # ----------------------------------------------------
+
+        if args.text:
+
+            try:
+
+                user_query = input(
+                    "COMMAND: "
+                ).strip().lower()
+
+            except EOFError:
+
+                break
+
+        else:
+
+            user_query = listen()
+
+        # ----------------------------------------------------
+        # NO COMMAND
+        # ----------------------------------------------------
+
+        if (
+            user_query == "none"
+            or not user_query
+        ):
+
+            speak(
+                "I didn't hear a command."
+            )
+
+            continue
+
+        user_query = (
+            user_query.lower().strip()
+        )
+
+        print(
+            f"You said: {user_query}"
+        )
+
+        # ----------------------------------------------------
+        # REMOVE JARVIS
+        # ----------------------------------------------------
+
+        clean_query = (
+            user_query
+            .replace("jarvis", "")
+            .strip()
+        )
+
+        # ----------------------------------------------------
+        # QUIT
+        # ----------------------------------------------------
+
+        quit_commands = [
+            "quit",
+            "exit",
+            "shutdown",
+            "close jarvis",
+            "stop jarvis"
+        ]
+
+        if clean_query in quit_commands:
+
+            print(
+                "Shutting down JARVIS..."
+            )
+
+            speak(
+                "Shutting down. Goodbye."
+            )
+
+            break
+
+        # ----------------------------------------------------
+        # DIRECT YOUTUBE COMMAND
+        # ----------------------------------------------------
+
+        if handle_youtube_command(
+            clean_query
+        ):
+
+            continue
+
+        # ----------------------------------------------------
+        # DIRECT COMMANDS
+        # ----------------------------------------------------
+
+        direct_commands = [
+            "open",
+            "play",
+            "pause",
+            "resume",
+            "stop",
+            "volume",
+            "search",
+            "create",
+            "write",
+            "read",
+            "make",
+            "close",
+            "launch",
+            "start",
+            "who",
+            "what",
+            "when",
+            "where",
+            "how",
+            "why",
+            "thank",
+            "thanks",
+            "hello",
+            "hi"
+        ]
+
+        is_direct = any(
+            clean_query.startswith(
+                command
+            )
+            for command in direct_commands
+        )
+
+        # ----------------------------------------------------
+        # PROCESS COMMAND
+        # ----------------------------------------------------
+
+        if not is_direct:
+
+            print(
+                f"Sending to JARVIS AI: "
+                f"{clean_query}"
+            )
+
+        try:
+
+            print(
+                f"Thinking: {clean_query}"
+            )
+
+            response = (
+                jarvis.run_conversation(
+                    clean_query
+                )
+            )
+
+            if pause_event.is_set():
+
+                continue
+
+            if response:
+
+                if args.text:
+
+                    print(
+                        f"JARVIS: {response}"
+                    )
+
+                speak(
+                    response
+                )
+
+        except Exception as e:
+
+            print(
+                f"Main Loop Error: {e}"
+            )
+
+            speak(
+                "I encountered a system error."
+            )
+
+
+# ============================================================
+# MAIN
+# ============================================================
+
+def main():
+
+    parser = argparse.ArgumentParser(
+        description="JARVIS AI Assistant"
+    )
+
+    parser.add_argument(
+        "--text",
+        action="store_true",
+        help="Run in text mode instead of voice mode"
+    )
+
+    args = parser.parse_args()
+
+    # --------------------------------------------------------
+    # PAUSE EVENT + REGISTRY
+    # --------------------------------------------------------
+
+    pause_event = threading.Event()
+
+    registry = SkillRegistry()
+
+    context = {
+        "pause_event": pause_event,
+        "registry": registry
+    }
+
+    # --------------------------------------------------------
+    # LOAD SKILLS
+    # --------------------------------------------------------
+
+    skills_dir = os.path.join(
+        os.path.dirname(__file__),
+        "skills"
+    )
+
+    registry.load_skills(
+        skills_dir,
+        context=context
+    )
+
+    # --------------------------------------------------------
+    # START JARVIS VOICE THREAD
+    # --------------------------------------------------------
+
+    t = threading.Thread(
+        target=jarvis_loop,
+        args=(
+            pause_event,
+            registry,
+            args
+        ),
+        daemon=True
+    )
+
+    t.start()
+
+    print(
+        "[JARVIS] Voice command system started."
+    )
+
+    # ========================================================
+    # START GESTURE CONTROLLER
+    # ========================================================
+
+    gesture_controller = None
+
+    try:
+
+        from skills.gesture_controller import (
+            GestureController
+        )
+
+        print(
+            "[JARVIS] Starting gesture controller..."
+        )
+
+        gesture_controller = GestureController(
+            callback=handle_gesture_event
+        )
+
+        # IMPORTANT:
+        # Your gesture_controller.py uses start(),
+        # NOT run().
+        gesture_controller.start()
+
+        print(
+            "[JARVIS] Gesture controller started."
+        )
+
+    except Exception as e:
+
+        print(
+            "[JARVIS] Gesture controller "
+            f"failed: {e}"
+        )
+
+    # --------------------------------------------------------
+    # START GUI
+    # --------------------------------------------------------
+
+    try:
+
+        run_gui_app(
+            pause_event
+        )
+
+    except KeyboardInterrupt:
+
+        print(
+            "\n[JARVIS] Shutting down..."
+        )
+
+    finally:
+
+        # ----------------------------------------------------
+        # STOP GESTURE CONTROLLER
+        # ----------------------------------------------------
+
+        if gesture_controller is not None:
+
+            try:
+
+                print(
+                    "[JARVIS] Stopping gesture controller..."
+                )
+
+                gesture_controller.stop()
+
+            except Exception as e:
+
+                print(
+                    f"[JARVIS] Gesture shutdown error: {e}"
+                )
+
+
+# ============================================================
+# ENTRY POINT
+# ============================================================
+
+if __name__ == "__main__":
+
+    main()

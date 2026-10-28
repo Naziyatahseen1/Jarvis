@@ -1,0 +1,47 @@
+# Environment Variables
+.env
+
+# Personal Data
+contacts.json
+whatsapp_profile/
+
+# Python / System
+__pycache__/
+*.pyc
+.DS_Store
+venv/
+.python-version
+
+# Logs and User Notes
+*.log
+PyWhatKit_DB.txt
+
+# Generated Runtime Content
+# Excluding captured photos and detections while keeping static assets like arc_reactor.png
+assets/detection_*.jpg
+assets/photo_*.jpg
+venv_trash/
+.env
+contacts.json
+jarvis_chrome_profile/
+whatsapp_profile/
+__pycache__/
+*.pyc
+*.log
+venv/
+venv_trash/
+PyWhatKit_DB.txt
+.DS_Store
+.env
+contacts.json
+jarvis_chrome_profile/
+whatsapp_profile/
+__pycache__/
+*.pyc
+*.log
+venv/
+venv_trash/
+PyWhatKit_DB.txt
+.DS_Store
+yolov8n.pt
+hand_landmarker.task
